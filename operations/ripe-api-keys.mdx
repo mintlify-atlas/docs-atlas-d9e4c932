@@ -1,0 +1,92 @@
+---
+title: 'Rotating RIPE API credentials before they expire'
+description: 'RIPE API keys expire after 12 months. Use the provided update-ripe-key.sh script to back up, update credentials in .env.updater, and restart containers.'
+---
+
+RIPE imposes a maximum 12-month TTL on API keys. When your keys expire, you must update `RIPE_API_USER` and `RIPE_API_PASS` in `.env.updater` and restart the containers. There are two ways to do this: using the included helper script, or updating the file manually.
+
+<Tip>
+Set a calendar reminder a few weeks before your RIPE API key is due to expire to avoid any service interruption.
+</Tip>
+
+<Warning>
+Failing to update credentials before they expire will cause all RIPE database updates to fail. The updater may return errors or fail silently, meaning prefix changes in Netbox will not be reflected in the RIPE DB until the credentials are refreshed.
+</Warning>
+
+## Method 1 — Using the helper script (recommended)
+
+A script is included at `./update-ripe-key.sh` that handles the backup, credential update, and container restart in one step.
+
+The script does the following:
+
+1. Prompts you for the new `RIPE_API_USER` and `RIPE_API_PASS` (the password is typed silently)
+2. Creates a timestamped backup of `.env.updater` (e.g., `.env.updater.bak.20260517_143000`) before making any changes
+3. Updates `RIPE_API_USER` and `RIPE_API_PASS` in `.env.updater` in place, adding the lines if they are missing
+4. Runs `docker compose down && docker compose up -d` to restart the stack with the new credentials
+
+To run it:
+
+```bash
+bash update-ripe-key.sh
+```
+
+The full script contents are shown below for reference:
+
+```bash
+#!/bin/bash
+set -e
+
+ENV_FILE=".env.updater"
+
+read -r -p "Enter RIPE_API_USER: " NEW_USER
+read -r -s -p "Enter RIPE_API_PASS: " NEW_PASS
+echo
+
+BACKUP="${ENV_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
+cp "$ENV_FILE" "$BACKUP"
+echo "Backup saved to $BACKUP"
+
+sed -i -e '$a\' "$ENV_FILE"
+
+if grep -q '^RIPE_API_USER=' "$ENV_FILE"; then
+  sed -i "s/^RIPE_API_USER=.*/RIPE_API_USER=$NEW_USER/" "$ENV_FILE"
+else
+  echo "RIPE_API_USER=$NEW_USER" >> "$ENV_FILE"
+fi
+
+if grep -q '^RIPE_API_PASS=' "$ENV_FILE"; then
+  sed -i "s/^RIPE_API_PASS=.*/RIPE_API_PASS=$NEW_PASS/" "$ENV_FILE"
+else
+  echo "RIPE_API_PASS=$NEW_PASS" >> "$ENV_FILE"
+fi
+
+docker compose down
+docker compose up -d
+
+echo "-------------------------------------------------------------"
+echo "RIPE API credentials updated and Docker containers restarted."
+echo "-------------------------------------------------------------"
+```
+
+## Method 2 — Manual update
+
+If you prefer to update the credentials by hand:
+
+1. Open `.env.updater` and set the new values for `RIPE_API_USER` and `RIPE_API_PASS`:
+
+   ```bash
+   RIPE_API_USER=your_new_user
+   RIPE_API_PASS=your_new_password
+   ```
+
+2. Stop the stack:
+
+   ```bash
+   docker compose down
+   ```
+
+3. Start the stack again with the updated credentials:
+
+   ```bash
+   docker compose up -d
+   ```

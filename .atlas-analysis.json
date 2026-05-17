@@ -1,0 +1,73 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Netbox RIPE Updater",
+  "projectDescription": "A Docker Compose wrapper that automatically synchronises NetBox IP prefix data with the RIPE database, with built-in S3 backups and custom NETNAME support.",
+  "theme": "aspen",
+  "primaryColor": "#9ca4aa",
+  "lightColor": "#3e4554",
+  "darkColor": "#d7d8db",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/netbox-setup",
+              "configuration/templates"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/running",
+              "operations/updating",
+              "operations/ripe-api-keys",
+              "operations/backups"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/endpoints",
+              "reference/troubleshooting"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Automatic synchronisation of NetBox prefixes to RIPE DB (INETNUM/INET6NUM objects)",
+    "Docker Compose deployment with zero-configuration Minio S3 backup storage",
+    "Custom NETNAME support via NetBox custom fields",
+    "HTTP Basic Auth protected backup browser UI",
+    "Support for RIPE API key authentication with rotation script",
+    "Jinja-style JSON template system for RIPE object attributes",
+    "Overlap detection and resolution for INET(6)NUM objects",
+    "Email reporting for RIPE DB changes",
+    "IPv4 and IPv6 prefix support with configurable smallest-prefix limits",
+    "ISO 3166 country code auto-resolution from NetBox site regions"
+  ],
+  "publicApiSurface": [
+    "POST /update — Accepts NetBox webhook payloads to create/update/delete RIPE objects",
+    "GET /health — Health check endpoint",
+    "GET /backups — Basic-auth protected list of backup files",
+    "GET /backup/<name> — Basic-auth protected retrieval of a specific backup file",
+    "Environment: UPDATER_HTTP_PORT, RIPE_TEMPLATE_DIR, MINIO_ROOT_USER, MINIO_ROOT_PASSWORD",
+    "Environment: UI_USER, UI_PASSWORD, UPDATE_TOKEN, NETBOX_URL, NETBOX_TOKEN",
+    "Environment: RIPE_API_USER, RIPE_API_PASS, RIPE_DB, DEFAULT_COUNTRY",
+    "Environment: S3_BACKUP, S3_ENDPOINT_URL, S3_ACCESS_KEY, S3_SECRET_ACCESS_KEY, S3_BUCKET",
+    "Environment: INCLUDE_ORG, INCLUDE_DESCR, SMALLEST_PREFIX_V4, SMALLEST_PREFIX_V6",
+    "Script: update-ripe-key.sh — Interactive RIPE API credential rotation with backup"
+  ]
+}

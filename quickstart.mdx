@@ -1,81 +1,143 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Quickstart: deploy Netbox RIPE Updater with Docker"
+description: "Clone the repo, configure your environment files, set up templates, and start the Docker Compose stack to begin syncing NetBox prefixes to RIPE DB."
 ---
 
-## Get started in three steps
+This guide walks through the complete setup of Netbox RIPE Updater, from cloning the repository to running the Docker Compose stack. Each step covers what you are configuring and why, so you understand how the components fit together before going live.
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Clone the repository">
+    Clone the repository and move into the project directory:
 
-### Step 1: Set up your local environment
+    ```bash
+    git clone https://github.com/grizzlyware/netbox-ripe-updater.git
+    cd netbox-ripe-updater
+    ```
+  </Step>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Copy the environment files">
+    The project ships with two example environment files. Copy both to create your local configuration:
 
-### Step 2: Deploy your changes
+    ```bash
+    cp .env.example .env
+    cp .env.updater.example .env.updater
+    ```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    `.env` controls the Docker Compose stack (ports, template directory, Minio credentials). `.env.updater` is passed directly into the `ripe-updater` container and holds all service-level credentials.
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Configure .env">
+    Open `.env` and update the following values:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    # The port/address which the updater will bind to on the host machine.
+    UPDATER_HTTP_PORT=127.0.0.1:9000
 
-### Step 3: Go live
+    # The template directory to use for the RIPE updater (copy your templates to 'custom' & change this)
+    RIPE_TEMPLATE_DIR=./ripe-templates/example
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    # Minio access details
+    # When changing, update S3_ACCESS_KEY & S3_SECRET_ACCESS_KEY in .env.updater too
+    MINIO_ROOT_USER=CjGb9PDkjQqMi6V
+    MINIO_ROOT_PASSWORD=8s82NHXq6pPsJAP4S
+    ```
 
-## Next steps
+    - **`UPDATER_HTTP_PORT`** — The host address and port the updater HTTP interface binds to. The default `127.0.0.1:9000` binds only to localhost; adjust this if you need the service reachable on another interface.
+    - **`RIPE_TEMPLATE_DIR`** — Path to the directory containing your RIPE object templates. Change this to your custom templates directory once you have configured your templates (see step 5).
+    - **`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`** — Credentials for the Minio backup storage container. These must match the `S3_ACCESS_KEY` and `S3_SECRET_ACCESS_KEY` values in `.env.updater`.
 
-Now that you have your docs running, explore these key features:
+    <Warning>
+      Change `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `S3_ACCESS_KEY`, and `S3_SECRET_ACCESS_KEY` from their defaults before using this stack in production. The default values are publicly known and must not be used in a live environment.
+    </Warning>
+  </Step>
+
+  <Step title="Configure .env.updater">
+    Open `.env.updater` and fill in each section with your environment's values:
+
+    ```bash
+    # UI credentials, ie /backups (Administrators -> Updater UI)
+    UI_USER=admin
+    UI_PASSWORD=password
+
+    # Update API credentials (Netbox -> Updater)
+    UPDATE_TOKEN=Token 123456abcdef
+
+    # Netbox API (Updater -> Netbox)
+    NETBOX_URL=https://netbox.local
+    NETBOX_TOKEN=123456abcdef
+
+    # RIPE (Updater -> RIPE)
+    DEFAULT_COUNTRY=GB
+    RIPE_API_USER=empty_user
+    RIPE_API_PASS=empty_pass
+    RIPE_DB=TEST
+
+    # S3 (Minio by default) backup storage (these must match Minio credentials in .env if using Minio)
+    S3_ACCESS_KEY=CjGb9PDkjQqMi6V
+    S3_SECRET_ACCESS_KEY=8s82NHXq6pPsJAP4S
+    #S3_ENDPOINT_URL (defaulted to local Minio)
+
+    # Misc
+    DEBUG=no
+    ```
+
+    - **`UI_USER` / `UI_PASSWORD`** — Credentials for the updater web UI, used to access the `/backups` endpoint.
+    - **`UPDATE_TOKEN`** — The bearer token NetBox uses when calling the updater API. Set this to a long random string and configure the matching webhook in NetBox.
+    - **`NETBOX_URL` / `NETBOX_TOKEN`** — The URL of your NetBox instance and an API token with read access to prefixes and regions.
+    - **`DEFAULT_COUNTRY`** — ISO Alpha-2 country code used as a fallback when a region slug cannot be resolved.
+    - **`RIPE_API_USER` / `RIPE_API_PASS`** — Your RIPE NCC API credentials. RIPE imposes a maximum 12-month TTL on API keys; you will need to rotate these periodically.
+    - **`RIPE_DB`** — The RIPE database to write to. Defaults to `TEST`.
+    - **`S3_ACCESS_KEY` / `S3_SECRET_ACCESS_KEY`** — Must match `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` in `.env` when using the bundled Minio container.
+
+    <Note>
+      `RIPE_DB` defaults to `TEST`, which directs all changes to the RIPE test database. No live RIPE objects are modified until you change this value to `RIPE` and restart the stack.
+    </Note>
+  </Step>
+
+  <Step title="Set up RIPE templates">
+    The updater requires RIPE object templates to know how to format INETNUM and related objects. Copy the example templates from `ripe-templates/example` to a custom directory and edit them to match your organisation:
+
+    ```bash
+    cp -r ripe-templates/example ripe-templates/custom
+    ```
+
+    Then update `RIPE_TEMPLATE_DIR` in `.env` to point to your custom directory:
+
+    ```bash
+    RIPE_TEMPLATE_DIR=./ripe-templates/custom
+    ```
+
+    For full details on template structure and available variables, see [Set up RIPE templates](/configuration/templates).
+  </Step>
+
+  <Step title="Start the stack">
+    Once your environment files and templates are configured, bring up the Docker Compose stack:
+
+    ```bash
+    docker compose up
+    ```
+
+    Add the `-d` flag to run in the background:
+
+    ```bash
+    docker compose up -d
+    ```
+
+    The stack starts the `ripe-updater` service and a local Minio instance for backup storage. The updater UI is available at the address defined by `UPDATER_HTTP_PORT`.
+  </Step>
+</Steps>
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Full environment reference" icon="sliders" href="/configuration/environment-variables">
+    Detailed reference for every variable in `.env` and `.env.updater`.
+  </Card>
+  <Card title="Configure NetBox" icon="network-wired" href="/configuration/netbox-setup">
+    Set up the NetBox webhook and API token to connect NetBox to the updater.
+  </Card>
+  <Card title="Set up RIPE templates" icon="file-code" href="/configuration/templates">
+    Learn how to structure and customise your RIPE object templates.
+  </Card>
+  <Card title="Running the stack" icon="circle-play" href="/operations/running">
+    Commands and guidance for running, stopping, and monitoring the stack.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

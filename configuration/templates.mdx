@@ -1,0 +1,162 @@
+---
+title: 'RIPE object templates: attributes and inheritance'
+description: 'Define INETNUM and INET6NUM attributes using JSON template files. Templates support inheritance from base files and per-template attribute overrides.'
+---
+
+The template system controls which attributes are written to RIPE DB objects when the updater processes a prefix. Templates are JSON files stored in the directory set by `RIPE_TEMPLATE_DIR` in `.env`. Three file types work together to produce the final RIPE object: an LIR-to-organisation mapping file, one or more base templates containing default attributes, and a named template index that ties everything together and maps to the choices you define in the NetBox `ripe_template` custom field.
+
+<Note>
+  The `INCLUDE_ORG` and `INCLUDE_DESCR` environment variables in `.env.updater` control whether the `org` and `descr` attributes appear in the generated RIPE object, regardless of what your templates define. Set either to `no` to suppress the corresponding field entirely.
+</Note>
+
+## File types
+
+### lir_org.json
+
+Maps LIR identifiers to their RIPE organisation object handles. When a base template contains an empty `{"org": ""}` statement, the updater looks up the LIR for the prefix's parent aggregate and fills in the corresponding organisation handle from this file.
+
+```json lir_org.json
+{ 
+    "templates": {
+        "lir_org": {
+            "de.examplelir1": "ORG-EIPB1-TEST",
+            "nl.examplelir2": "ORG-TT1-TEST"
+        }
+    }
+}
+```
+
+Each key is the LIR identifier as entered in the NetBox `lir` custom field on the aggregate. The value is the RIPE organisation object handle to write to the `org` attribute.
+
+### base_\*.json
+
+Base templates define the default set of INETNUM/INET6NUM attributes shared across multiple named templates. You can have as many base templates as you need — for example, one for your own network and one per customer with a different `abuse-c` or `mnt-by`.
+
+A base template must include an empty `{"org": ""}` entry to trigger automatic organisation lookup from `lir_org.json`. If `org` is set to a non-empty string, that value is used directly instead.
+
+```json base_mycompany.json
+{ "attributes": [
+    {"org": ""},
+    {"remarks": "Managed by ripe-updater"},
+    {"admin-c": "AA1-TEST"},
+    {"tech-c": "AA1-TEST"},
+    {"notify": "noc@example.com"},
+    {"mnt-by": "TEST-DBM-MNT"},
+    {"source": "TEST"}
+]}
+```
+
+```json base_mycustomer1.json
+{ "attributes": [
+    {"remarks": "Managed by ripe-updater"},
+    {"org": "ORG-EIPB1-TEST"},
+    {"admin-c": "AA2-TEST"},
+    {"tech-c": "AA2-TEST"},
+    {"abuse-c": "AA1-TEST"},
+    {"notify": "noc@example.com"},
+    {"mnt-by": "TEST-NCC-HM-MNT"},
+    {"source": "TEST"}
+]}
+```
+
+Note that `base_mycustomer1.json` specifies a fixed `org` value rather than an empty one. This is appropriate when the customer's organisation handle is known and static.
+
+### templates.json
+
+Defines the named templates that appear as choices in the NetBox `ripe_template` custom field. Each entry has a `descr` attribute used as the per-template description and an `inherit` key that points to the base template file to use.
+
+```json templates.json
+{
+    "templates":
+    {
+        "CLOUD-POOL": {"attributes": [
+            {"descr": "MyCompany Cloud Pool"}
+        ],
+            "inherit": "base_mycompany.json"
+        },
+        "INFRA-TRANSFER-NET": {"attributes": [
+            {"descr": "MyCompany Infrastructure Transfer Network"}
+        ],
+            "inherit": "base_mycompany.json"
+        },
+        "CUST-ACCESS-NET": {"attributes": [
+            {"descr": "MyCompany Customer Access"}
+        ],
+            "inherit": "base_mycompany.json"
+        },
+        "CUST-ACCESS-NET-MYCUSTOMER1": {"attributes": [
+            {"descr": "MyCustomer 1 Ltd., Example Street 33"}
+        ],
+            "inherit": "base_mycustomer1.json"
+        }
+    }
+}
+```
+
+## Attribute ordering
+
+The updater assembles the final RIPE object in a fixed order regardless of how attributes appear in your template files:
+
+1. **Dynamic attributes** — always written first: `inetnum`/`inet6num` (the prefix itself), `netname`, `org` (if `INCLUDE_ORG=yes`), `country`
+2. **Template attributes** — `descr` and any other per-template overrides from `templates.json`
+3. **Base attributes** — the remaining fields from the inherited `base_*.json` file, excluding any already provided by the template
+
+When `RIPE_DB=TEST`, the updater automatically overrides the `source` attribute to `TEST` regardless of what your base template specifies.
+
+## Setting up templates from scratch
+
+<Tip>
+  Use `RIPE_DB=TEST` while developing your templates. All changes go to `rest-test.db.ripe.net` and do not affect your live RIPE objects until you switch to `RIPE_DB=RIPE`.
+</Tip>
+
+<Steps>
+  <Step title="Create your custom template directory">
+    ```bash
+    mkdir ripe-templates/custom
+    ```
+  </Step>
+
+  <Step title="Create lir_org.json">
+    Copy the example and replace the LIR identifiers and organisation handles with your own.
+
+    ```bash
+    cp ripe-templates/example/lir_org.json ripe-templates/custom/lir_org.json
+    ```
+
+    Edit the file so each key matches the values you will enter in the NetBox `lir` custom field on your aggregates, and each value is the corresponding RIPE organisation object handle.
+  </Step>
+
+  <Step title="Create one or more base_*.json files">
+    Start from the example and adjust `admin-c`, `tech-c`, `mnt-by`, `notify`, and `source` to match your RIPE objects.
+
+    ```bash
+    cp ripe-templates/example/base_mycompany.json ripe-templates/custom/base_mycompany.json
+    ```
+
+    Keep `{"org": ""}` in the attributes list if you want the organisation to be resolved automatically from `lir_org.json`. Replace it with a fixed organisation handle if you want to hard-code the `org` value for a particular base template.
+  </Step>
+
+  <Step title="Create templates.json">
+    Define one entry per named template. Each template must have a `descr` attribute and an `inherit` key pointing to one of your `base_*.json` files.
+
+    ```bash
+    cp ripe-templates/example/templates.json ripe-templates/custom/templates.json
+    ```
+
+    The keys (`CLOUD-POOL`, `INFRA-TRANSFER-NET`, etc.) must exactly match the choices you configure in the NetBox `ripe_template` custom field.
+  </Step>
+
+  <Step title="Update RIPE_TEMPLATE_DIR in .env">
+    Point the environment variable at your new directory so Docker Compose mounts it into the container.
+
+    ```bash
+    RIPE_TEMPLATE_DIR=./ripe-templates/custom
+    ```
+
+    Restart the stack after making this change.
+
+    ```bash
+    docker compose down && docker compose up -d
+    ```
+  </Step>
+</Steps>

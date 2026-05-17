@@ -1,0 +1,172 @@
+---
+title: "HTTP endpoints: webhook, health, and backup API"
+description: "Reference for all HTTP endpoints exposed by Netbox RIPE Updater: the NetBox webhook receiver, health check, and Basic Auth–protected backup browser."
+---
+
+The ripe-updater Flask application exposes four HTTP endpoints. Three are used for operational purposes and one is the core webhook receiver that processes NetBox prefix events.
+
+---
+
+## GET /health
+
+No authentication required. Returns the plain text string `Ok` with HTTP 200. Use this endpoint for health checks from a monitoring system or load balancer probe.
+
+```bash
+curl http://your-ripe-updater-host/health
+```
+
+**Response**
+
+```
+Ok
+```
+
+| Status | Meaning |
+|--------|---------|
+| `200 OK` | Service is running |
+
+---
+
+## POST /update
+
+The core webhook receiver. NetBox calls this endpoint whenever a prefix is created, updated, or deleted. The endpoint authenticates via a token header, validates the payload, then creates, updates, or deletes the corresponding RIPE inetnum/inet6num object.
+
+### Authentication
+
+<ParamField header="Authorisation" type="string">
+  Token-based authentication header. Required only when `UPDATE_TOKEN` is set in `.env.updater`. Value must exactly match `UPDATE_TOKEN`. Note the British spelling of `Authorisation` (with an `s`). Returns `401` if the header value does not match.
+</ParamField>
+
+### Request
+
+<ParamField header="Content-Type" type="string" required>
+  Must be `application/json`.
+</ParamField>
+
+The request body is the standard NetBox webhook JSON payload. The following fields are read by the updater:
+
+<ParamField body="model" type="string" required>
+  Must be `"prefix"`. Any other value returns `400 Bad Request` with the message `only prefixes are supported`.
+</ParamField>
+
+<ParamField body="event" type="string" required>
+  The NetBox event type. One of `"created"`, `"updated"`, or `"deleted"`. A `"deleted"` event always triggers deletion of the RIPE object regardless of `ripe_report`.
+</ParamField>
+
+<ParamField body="data.prefix" type="string" required>
+  The prefix string, e.g. `192.0.2.0/24` or `2001:db8::/32`.
+</ParamField>
+
+<ParamField body="data.custom_fields.ripe_report" type="boolean" required>
+  When `true` and the event is not `"deleted"`, the RIPE object is created or updated. When `false`, the RIPE object is deleted.
+</ParamField>
+
+<ParamField body="data.custom_fields.ripe_template" type="string" required>
+  The template key to use when building the RIPE object. Must match a key in `templates.json` (matched case-sensitively after uppercasing).
+</ParamField>
+
+<ParamField body="data.custom_fields.ripe_netname" type="string">
+  Optional. Overrides the `netname` attribute on the RIPE object. When not set, the `netname` is derived from the `ripe_template` value.
+</ParamField>
+
+<ParamField body="username" type="string">
+  Optional. The NetBox username who triggered the webhook event. Used in log output and email reports. If absent, the updater logs `"None"` as the username.
+</ParamField>
+
+### Behaviour
+
+| Condition | Action |
+|-----------|--------|
+| `ripe_report=false` | Delete the RIPE object |
+| `event="deleted"` | Delete the RIPE object |
+| `ripe_report=true` and `event` is `"created"` or `"updated"` | Create or update the RIPE object |
+
+Two exceptions are caught and returned as `200` rather than errors:
+
+- `NotRoutedNetwork` — the prefix is an RFC1918 or otherwise non-routable address; the request is skipped silently.
+- `ErrorSmallPrefix` — the prefix length exceeds `SMALLEST_PREFIX_V4` (default `31`) or `SMALLEST_PREFIX_V6` (default `127`); the request is skipped silently.
+
+### Response codes
+
+| Status | Meaning |
+|--------|---------|
+| `204 No Content` | Operation succeeded |
+| `200 OK` | Prefix skipped (`NotRoutedNetwork` or `ErrorSmallPrefix`) |
+| `400 Bad Request` | Invalid payload, missing fields, or unsupported model type |
+| `401 Unauthorized` | Token mismatch |
+| `500 Internal Server Error` | RIPE DB operation failed |
+
+### Example
+
+```bash
+curl -X POST http://your-ripe-updater-host/update \
+  -H "Authorisation: Token mysecrettoken" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "prefix",
+    "event": "updated",
+    "data": {
+      "prefix": "192.0.2.0/24",
+      "custom_fields": {
+        "ripe_report": true,
+        "ripe_template": "CLOUD-POOL",
+        "ripe_netname": "EXAMPLE-NET"
+      }
+    }
+  }'
+```
+
+---
+
+## GET /backups
+
+Lists all backup files stored in S3. Requires HTTP Basic Auth using `UI_USER` and `UI_PASSWORD` from `.env.updater`. Returns an HTML page. Returns `401` if unauthenticated.
+
+A backup is automatically saved for any prefix that exists in the RIPE DB before it is overwritten or deleted.
+
+```bash
+curl -u admin:password http://your-ripe-updater-host/backups
+```
+
+| Status | Meaning |
+|--------|---------|
+| `200 OK` | HTML page listing backup files |
+| `401 Unauthorized` | Missing or incorrect Basic Auth credentials |
+
+---
+
+## GET /backup/\{name\}
+
+Returns the JSON content of a single backup file. Requires HTTP Basic Auth using `UI_USER` and `UI_PASSWORD`. Use this endpoint to retrieve a specific backup before restoring it manually via the RIPE REST API.
+
+### Path parameter
+
+<ParamField path="name" type="string" required>
+  The backup filename. Filenames follow the pattern `prefix_<prefix>_<length>.json`, where `/` in the prefix is replaced with `_`. For example, `192.0.2.0/24` becomes `prefix_192.0.2.0_24.json`.
+</ParamField>
+
+### Response
+
+<ResponseField name="objects" type="object">
+  The full RIPE DB JSON representation of the backed-up inetnum or inet6num object, as returned by the RIPE REST API at the time of backup.
+</ResponseField>
+
+```bash
+curl -u admin:password \
+  http://your-ripe-updater-host/backup/prefix_192.0.2.0_24.json
+```
+
+To restore the backup, post the file directly to the RIPE REST API:
+
+```bash
+curl --user "RIPE_API_USER:RIPE_API_PASS" \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  --data @prefix_192.0.2.0_24.json \
+  'https://rest.db.ripe.net/ripe/inetnum'
+```
+
+| Status | Meaning |
+|--------|---------|
+| `200 OK` | JSON content of the backup file |
+| `401 Unauthorized` | Missing or incorrect Basic Auth credentials |

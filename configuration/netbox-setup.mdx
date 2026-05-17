@@ -1,0 +1,108 @@
+---
+title: 'Configure NetBox custom fields, regions, and webhooks'
+description: 'Add the four required custom fields to NetBox, configure the webhook that triggers the updater, and set up ISO country region slugs for country resolution.'
+---
+
+Netbox RIPE Updater relies on four custom fields on NetBox objects and a webhook to trigger synchronisation. The updater also walks your region hierarchy to determine the country code written to each RIPE object. This page covers exactly what to create in your NetBox instance before the updater can process any prefixes.
+
+<Steps>
+  <Step title="Add the custom fields">
+    Create the following four custom fields in NetBox under **Customization → Custom Fields**.
+
+    <AccordionGroup>
+      <Accordion title="lir — LIR assignment on aggregates">
+        Assigns a RIPE Local Internet Registry to an aggregate. The updater uses this to look up the corresponding organisation object from `lir_org.json`.
+
+        | Field | Value |
+        |---|---|
+        | Name | `lir` |
+        | Label | `LIR` |
+        | Assigned models | `ipam → aggregates` |
+        | Type | Selection |
+        | Required | Yes |
+        | Choices | All LIR identifiers you are responsible for (e.g. `de.examplelir1`, `nl.examplelir2`) |
+        | Description | `RIPE Local Internet Registry` |
+      </Accordion>
+
+      <Accordion title="ripe_report — opt-in flag on prefixes">
+        Controls whether a prefix is synchronised to the RIPE database at all. Only prefixes with this field set to `true` are processed by the updater.
+
+        | Field | Value |
+        |---|---|
+        | Name | `ripe_report` |
+        | Label | `RIPE Report` |
+        | Assigned models | `ipam → prefixes` |
+        | Type | Boolean |
+        | Required | No |
+        | Default | `false` |
+        | Description | `should this prefix be in RIPE-DB` |
+      </Accordion>
+
+      <Accordion title="ripe_template — template selection on prefixes">
+        Selects which named template from `templates.json` is used to generate the RIPE object for this prefix. The choices here must match the keys defined in your `templates.json` file.
+
+        | Field | Value |
+        |---|---|
+        | Name | `ripe_template` |
+        | Label | `RIPE Template` |
+        | Assigned models | `ipam → prefixes` |
+        | Type | Selection |
+        | Required | No |
+        | Choices | All template names you have defined in `templates.json` (e.g. `CLOUD-POOL`, `INFRA-TRANSFER-NET`) |
+        | Description | `RIPE template to use` |
+      </Accordion>
+
+      <Accordion title="ripe_netname — custom NETNAME override on prefixes">
+        Overrides the `netname` attribute written to the RIPE object. When not set, the updater derives the netname from the template. Use this field when you need a specific, per-prefix netname that differs from the template default.
+
+        | Field | Value |
+        |---|---|
+        | Name | `ripe_netname` |
+        | Label | `RIPE Netname` |
+        | Assigned models | `ipam → prefixes` |
+        | Type | String |
+        | Required | No |
+        | Description | `Custom NETNAME for RIPE object — overrides template name if set` |
+      </Accordion>
+    </AccordionGroup>
+  </Step>
+
+  <Step title="Structure regions for country resolution">
+    The updater determines which country code to write to the RIPE `country` attribute by inspecting the region hierarchy of the site the prefix is assigned to. It walks up the region tree until it finds a region whose slug is a valid ISO 3166-1 alpha-2 code.
+
+    For example, if a prefix belongs to a site in the region **Amsterdam**, which has a parent region with the slug `nl`, the updater sets `country: NL`. The comparison is case-insensitive, so `nl`, `NL`, and `Nl` all match.
+
+    To ensure correct resolution:
+
+    - Create at least one region per country whose slug is the two-letter ISO country code (e.g. `gb`, `de`, `nl`).
+    - Nest city or site-level regions beneath the country region.
+    - If no matching region is found anywhere in the hierarchy, the updater falls back to `DEFAULT_COUNTRY` from `.env.updater`. If that is also unset, the update will fail.
+  </Step>
+
+  <Step title="Create the webhook">
+    Add a webhook in NetBox under **Operations → Webhooks** so that the updater is notified whenever a prefix is created, updated, or deleted.
+
+    | Field | Value |
+    |---|---|
+    | Name | `ripe-updater` |
+    | Enabled | Yes |
+    | Events | Create, Update, Delete |
+    | HTTP method | `POST` |
+    | Payload URL | `http(s)://your-ripe-updater-host/update` |
+    | HTTP content type | `application/json` |
+    | Assigned models | `ipam \| prefix` |
+    | SSL verification | Enable if your updater has a valid TLS certificate |
+
+    If you have set `UPDATE_TOKEN` in `.env.updater`, add the following additional header:
+
+    ```
+    Authorisation: Token YOURTOKEN
+    ```
+
+    Replace `YOURTOKEN` with the full value of your `UPDATE_TOKEN` variable, including the `Token ` prefix if you have included it there.
+
+    <Note>
+      The header name is `Authorisation` — British spelling with an `s`, not `Authorization` with a `z`. Using the wrong spelling will result in every webhook request being rejected with a 401 response.
+    </Note>
+  </Step>
+</Steps>

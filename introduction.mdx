@@ -1,0 +1,56 @@
+---
+title: "Netbox RIPE Updater: automate RIPE DB synchronisation"
+description: "Netbox RIPE Updater keeps your RIPE INETNUM and INET6NUM objects in sync with NetBox prefix data automatically via webhooks and Docker Compose."
+---
+
+Netbox RIPE Updater is a Docker Compose wrapper around the [ripe-updater](https://github.com/interdotlink/ripe-updater) tool that bridges your NetBox IP address management system and the RIPE database. When you update a prefix in NetBox, a webhook triggers the updater to create, modify, or delete the corresponding INETNUM or INET6NUM object in RIPE DB — no manual intervention required.
+
+The project adds several enhancements over the upstream ripe-updater: built-in Minio S3 backup storage for every RIPE object before it is overwritten or deleted, HTTP Basic Auth protection on the backup browser UI, support for RIPE API key authentication, custom `NETNAME` per prefix via a NetBox custom field, and a credential rotation helper script.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone, configure, and run the stack in minutes
+  </Card>
+  <Card title="Environment variables" icon="gear" href="/configuration/environment-variables">
+    Full reference for all `.env` and `.env.updater` settings
+  </Card>
+  <Card title="NetBox setup" icon="server" href="/configuration/netbox-setup">
+    Custom fields, webhooks, and region configuration
+  </Card>
+  <Card title="RIPE templates" icon="file-code" href="/configuration/templates">
+    Define INETNUM attributes with JSON templates
+  </Card>
+  <Card title="Running the stack" icon="play" href="/operations/running">
+    Start, stop, and monitor the Docker Compose services
+  </Card>
+  <Card title="HTTP endpoints" icon="network-wired" href="/reference/endpoints">
+    Webhook receiver, health check, and backup browser API
+  </Card>
+</CardGroup>
+
+## How it works
+
+<Steps>
+  <Step title="NetBox triggers a webhook">
+    When a prefix is created, updated, or deleted in NetBox, a configured webhook sends a JSON payload to the updater's `/update` endpoint.
+  </Step>
+  <Step title="The updater processes the prefix">
+    The updater fetches additional data from NetBox (LIR, country, template), constructs a valid RIPE object using your JSON templates, and backs up any existing RIPE object to S3/Minio.
+  </Step>
+  <Step title="RIPE DB is updated">
+    The updater creates, updates, or deletes the INETNUM/INET6NUM object in RIPE DB using your API credentials, then optionally sends an email report of the change.
+  </Step>
+</Steps>
+
+## Key features
+
+- **Automatic sync** — NetBox webhook events drive real-time RIPE DB updates for IPv4 and IPv6 prefixes
+- **Built-in backups** — Every object is backed up to Minio (or any S3-compatible store) before modification
+- **Custom NETNAME** — Set a per-prefix `ripe_netname` custom field in NetBox to override the default template name
+- **RIPE API key auth** — Authenticate with RIPE using API keys instead of passwords; rotate keys with `update-ripe-key.sh`
+- **Flexible templates** — JSON template files control which RIPE attributes are set, with inheritance between base and named templates
+- **Overlap handling** — Automatically detects overlapping INET(6)NUM objects and resolves them when safe to do so
+
+<Note>
+  This project follows [Semantic Versioning](https://semver.org/). Breaking changes are indicated by a major version bump. See [GitHub Releases](https://github.com/grizzlyware/netbox-ripe-updater/releases) for the changelog.
+</Note>

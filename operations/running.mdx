@@ -1,0 +1,86 @@
+---
+title: 'Starting, stopping, and monitoring the RIPE updater stack'
+description: 'Start the Netbox RIPE Updater Docker Compose services, run them in the background, check container status, and access logs for troubleshooting.'
+---
+
+After configuration, the entire stack — `ripe-updater` and Minio — runs via Docker Compose. The `ripe-updater` service is a Flask application built from `./ripe-updater/Dockerfile` that exposes HTTP on `UPDATER_HTTP_PORT`. Minio runs alongside it as internal S3-compatible backup storage. This page covers how to start, stop, monitor, and proxy the stack.
+
+## Services in the stack
+
+| Service | Description |
+|---|---|
+| `ripe-updater` | Flask app built from `./ripe-updater/Dockerfile`. Exposes HTTP on `UPDATER_HTTP_PORT`. |
+| `minio` | Bitnami Minio 2024. Provides S3-compatible backup storage. Not bound to the host. |
+
+<Note>
+Minio is not exposed to the host by default. It is only accessible within the Docker Compose network (`ripe-updater` bridge network), which means it cannot be reached from outside the machine.
+</Note>
+
+## Starting the stack
+
+To start all services in the foreground (logs stream to your terminal; press `CTRL+C` to stop):
+
+```bash
+docker compose up
+```
+
+To start in the background (daemon mode):
+
+```bash
+docker compose up -d
+```
+
+## Stopping the stack
+
+To stop and remove all containers:
+
+```bash
+docker compose down
+```
+
+This does not remove volumes, so your Minio backup data is preserved.
+
+## Viewing logs
+
+To follow logs from all services in real time:
+
+```bash
+docker compose logs -f
+```
+
+## Checking container status
+
+To see which containers are running and their current state:
+
+```bash
+docker compose ps
+```
+
+## Rebuilding images
+
+<Tip>
+Run `docker compose build` before `docker compose up` whenever you change the `Dockerfile` or any Python code in `./ripe-updater/`. Docker Compose does not automatically detect these changes.
+</Tip>
+
+```bash
+docker compose build
+docker compose up -d
+```
+
+## Reverse proxy recommendations
+
+### Same machine as Netbox (recommended: Nginx)
+
+If the updater runs on the same machine as your Netbox instance, proxy the updater through Nginx to benefit from TLS. Add the following location block to your Nginx configuration:
+
+```nginx
+location /ripe-updater/ {
+    proxy_pass http://127.0.0.1:9000/;
+}
+```
+
+This assumes `UPDATER_HTTP_PORT` is set to `127.0.0.1:9000` in your `.env` file, which binds the service only to localhost.
+
+### Different machine (recommended: Caddy via Docker Compose override)
+
+If the updater runs on a separate machine, consider adding Caddy to the stack via a Docker Compose override file to expose the updater with automatic TLS. When doing this, remove the host port binding for `UPDATER_HTTP_PORT` from `docker-compose.yml` and expose the Caddy HTTPS proxy on the host instead.

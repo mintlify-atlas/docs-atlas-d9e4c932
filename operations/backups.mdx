@@ -1,0 +1,71 @@
+---
+title: 'Browse and restore RIPE object backups from S3'
+description: 'Netbox RIPE Updater backs up every RIPE object to S3/Minio before overwriting or deleting it. Browse backups in the UI and restore with a curl command.'
+---
+
+Every time the updater modifies or deletes a RIPE object, it first fetches the current state from the RIPE DB and saves it as a JSON file to S3 (Minio by default). This means you can recover any prefix object that was accidentally changed or removed, as long as backups were enabled at the time.
+
+## Browsing backups
+
+Navigate to the `/backups` endpoint in your browser (e.g., `http://127.0.0.1:9000/backups`). Access requires HTTP Basic Auth using the credentials set in `.env.updater`:
+
+| Variable | Description |
+|---|---|
+| `UI_USER` | Basic auth username |
+| `UI_PASSWORD` | Basic auth password |
+
+The page lists all backed-up JSON files stored in the configured S3 bucket.
+
+### Backup filename format
+
+Backup files are named using the prefix, with forward slashes replaced by underscores:
+
+```
+prefix_<prefix_with_slashes_replaced_by_underscores>.json
+```
+
+For example, the prefix `192.168.1.0/24` is stored as:
+
+```
+prefix_192.168.1.0_24.json
+```
+
+## Restoring a backup
+
+To restore a backed-up RIPE object, download the JSON file from the `/backups` endpoint and POST it directly to the RIPE REST API.
+
+For an IPv4 `inetnum` object:
+
+```bash
+curl --user "RIPE_API_USER:RIPE_API_PASS" \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  --data @prefix_192.168.1.0_24.json \
+  'https://rest.db.ripe.net/ripe/inetnum'
+```
+
+Replace `RIPE_API_USER:RIPE_API_PASS` with your actual RIPE credentials, and use the appropriate endpoint for the object type:
+
+| Object type | RIPE endpoint |
+|---|---|
+| IPv4 (`inetnum`) | `https://rest.db.ripe.net/ripe/inetnum` |
+| IPv6 (`inet6num`) | `https://rest.db.ripe.net/ripe/inet6num` |
+
+## S3 and Minio configuration
+
+By default, the updater stores backups in the Minio service included in the Docker Compose stack. Minio is not bound to the host and is only accessible within the Docker network.
+
+To use a different S3-compatible backend, set the following variables in `.env.updater`:
+
+| Variable | Description |
+|---|---|
+| `S3_ENDPOINT_URL` | URL of your S3 endpoint (defaults to `http://minio:9000`) |
+| `S3_ACCESS_KEY` | S3 access key |
+| `S3_SECRET_ACCESS_KEY` | S3 secret access key |
+| `S3_BUCKET` | Bucket name for storing backups (defaults to `ripe-backups`) |
+
+To disable backups entirely, set `S3_BACKUP=no` in `.env.updater`.
+
+<Warning>
+Disabling backups (`S3_BACKUP=no`) means there is no recovery path for any RIPE object that is deleted or overwritten by the updater. This cannot be undone retroactively — only objects backed up before the change can be restored.
+</Warning>

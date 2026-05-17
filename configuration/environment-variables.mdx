@@ -1,0 +1,150 @@
+---
+title: 'Environment variable reference for Netbox RIPE Updater'
+description: 'Complete reference for all variables in .env and .env.updater: port binding, NetBox credentials, RIPE API settings, S3 backup, and email reporting.'
+---
+
+Netbox RIPE Updater uses two separate environment files. `.env` controls host-level settings consumed by Docker Compose — the port binding, template directory mount, and Minio credentials. `.env.updater` is loaded directly by the `ripe-updater` container and configures the application itself, including NetBox connection details, RIPE database credentials, S3 backup settings, and email reporting.
+
+<Warning>
+  `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` in `.env` must match `S3_ACCESS_KEY` and `S3_SECRET_ACCESS_KEY` in `.env.updater`. Change all four values from the example defaults before deploying to production.
+</Warning>
+
+<Tabs>
+  <Tab title=".env">
+    The `.env` file is read by Docker Compose and controls host-level behaviour. Copy `.env.example` to `.env` and edit before starting the stack.
+
+    <ParamField path="UPDATER_HTTP_PORT" type="string" default="127.0.0.1:9000">
+      The address and port the updater binds to on the host machine. The value is passed directly to Docker Compose's `ports` directive as the host side of the mapping. Set to `0.0.0.0:9000` to listen on all interfaces, or keep the default to restrict access to localhost when using a reverse proxy.
+    </ParamField>
+
+    <ParamField path="RIPE_TEMPLATE_DIR" type="string" default="./ripe-templates/example">
+      Path to the template directory on the host. Docker Compose mounts this directory into the container at `/opt/ripeupdater/templates` as a read-only volume. Point this at your own template directory once you have created one — for example `./ripe-templates/custom`.
+    </ParamField>
+
+    <ParamField path="MINIO_ROOT_USER" type="string" required>
+      Minio administrator username. This value is passed to the Minio container as `MINIO_ROOT_USER` and must match `S3_ACCESS_KEY` in `.env.updater` when using the bundled Minio instance.
+    </ParamField>
+
+    <ParamField path="MINIO_ROOT_PASSWORD" type="string" required>
+      Minio administrator password. Must match `S3_SECRET_ACCESS_KEY` in `.env.updater` when using the bundled Minio instance.
+    </ParamField>
+  </Tab>
+
+  <Tab title=".env.updater">
+    The `.env.updater` file is loaded by the `ripe-updater` container as its application configuration. Copy `.env.updater.example` to `.env.updater` and fill in real values before starting the stack.
+
+    ### Authentication
+
+    <ParamField path="UI_USER" type="string" required>
+      Username for HTTP Basic Auth protecting the `/backups` UI. There is no default — the UI is inaccessible until both `UI_USER` and `UI_PASSWORD` are set.
+    </ParamField>
+
+    <ParamField path="UI_PASSWORD" type="string" required>
+      Password for HTTP Basic Auth protecting the `/backups` UI.
+    </ParamField>
+
+    <ParamField path="UPDATE_TOKEN" type="string">
+      When set, every incoming webhook request from NetBox must include this value in an `Authorisation` header (e.g. `Authorisation: Token 123456abcdef`). Requests without a matching header are rejected. Leave unset to disable token validation.
+    </ParamField>
+
+    ### NetBox connection
+
+    <ParamField path="NETBOX_URL" type="url" required>
+      Base URL of your NetBox instance, for example `https://netbox.example.com`. The updater uses this to query prefixes, aggregates, regions, and sites via the NetBox REST API.
+    </ParamField>
+
+    <ParamField path="NETBOX_TOKEN" type="string" required>
+      NetBox API token. The token must have read access to prefixes, aggregates, regions, and sites.
+    </ParamField>
+
+    ### RIPE database
+
+    <ParamField path="DEFAULT_COUNTRY" type="string">
+      Fallback ISO 3166-1 alpha-2 country code used when the country cannot be determined from the site's region hierarchy (e.g. `GB`, `DE`, `NL`). If not set and no country can be resolved, the update will fail.
+    </ParamField>
+
+    <ParamField path="RIPE_API_USER" type="string" required>
+      RIPE DB API username with write permissions to your INET(6)NUM objects.
+    </ParamField>
+
+    <ParamField path="RIPE_API_PASS" type="string" required>
+      RIPE DB API password corresponding to `RIPE_API_USER`.
+    </ParamField>
+
+    <ParamField path="RIPE_DB" type="string" default="TEST">
+      Which RIPE database to target. Accepted values are `RIPE` (production) and `TEST` (RIPE test database). Defaults to `TEST` so that misconfigured deployments do not accidentally modify live objects.
+    </ParamField>
+
+    <Note>
+      With `RIPE_DB=TEST`, all changes are sent to `rest-test.db.ripe.net` and will not affect your live RIPE objects. Switch to `RIPE_DB=RIPE` only when you are confident your templates and NetBox data are correct.
+    </Note>
+
+    <ParamField path="SMALLEST_PREFIX_V4" type="number" default="31">
+      IPv4 prefixes with a prefix length greater than this value are silently skipped. For example, with the default of `31`, a `/32` host route will not be processed. Accepted range: 0–32.
+    </ParamField>
+
+    <ParamField path="SMALLEST_PREFIX_V6" type="number" default="127">
+      IPv6 prefixes with a prefix length greater than this value are silently skipped. Accepted range: 0–128.
+    </ParamField>
+
+    ### S3 backup storage
+
+    <ParamField path="S3_BACKUP" type="string" default="yes">
+      Enable or disable S3 backups. Accepted values: `yes` / `no`. When enabled, a JSON snapshot of each RIPE object is saved to S3 before it is overwritten or deleted. These snapshots are browsable at `/backups`.
+    </ParamField>
+
+    <ParamField path="S3_ENDPOINT_URL" type="url" default="http://minio:9000">
+      URL of the S3-compatible endpoint. Defaults to the bundled Minio container. Override with a real S3 endpoint (e.g. `https://s3.eu-west-1.amazonaws.com`) if you prefer external storage.
+    </ParamField>
+
+    <ParamField path="S3_ACCESS_KEY" type="string" required>
+      Access key for the S3 storage. When using the bundled Minio instance, this must match `MINIO_ROOT_USER` in `.env`.
+    </ParamField>
+
+    <ParamField path="S3_SECRET_ACCESS_KEY" type="string" required>
+      Secret access key for the S3 storage. When using the bundled Minio instance, this must match `MINIO_ROOT_PASSWORD` in `.env`.
+    </ParamField>
+
+    <ParamField path="S3_BUCKET" type="string" default="ripe-backups">
+      Name of the S3 bucket in which backups are stored. The Docker Compose file configures Minio to create this bucket automatically on first start.
+    </ParamField>
+
+    ### Object field control
+
+    <ParamField path="INCLUDE_ORG" type="string" default="yes">
+      Whether the `org` attribute should be written to INETNUM and INET6NUM objects. Accepted values: `yes` / `no`.
+    </ParamField>
+
+    <ParamField path="INCLUDE_DESCR" type="string" default="yes">
+      Whether the `descr` attribute should be written to INETNUM and INET6NUM objects. Accepted values: `yes` / `no`.
+    </ParamField>
+
+    ### Logging
+
+    <ParamField path="DEBUG" type="string" default="no">
+      Enable verbose logging. Accepted values: `yes` / `no`. Useful when diagnosing template rendering or RIPE API errors.
+    </ParamField>
+
+    ### Email reporting
+
+    <ParamField path="MAIL_REPORT" type="string" default="no">
+      Enable email reporting of RIPE DB operations. Accepted values: `yes` / `no`. Requires `SMTP`, `SENDER_MAIL`, and `RECIPIENT_MAIL` to be configured.
+    </ParamField>
+
+    <ParamField path="SMTP" type="string" default="127.0.0.1">
+      Hostname or IP address of the SMTP server used for email reports.
+    </ParamField>
+
+    <ParamField path="SMTP_STARTTLS" type="string" default="no">
+      Whether to use STARTTLS when connecting to the SMTP server. Accepted values: `yes` / `no`.
+    </ParamField>
+
+    <ParamField path="SENDER_MAIL" type="string">
+      From address for email reports. No default — required if `MAIL_REPORT=yes`.
+    </ParamField>
+
+    <ParamField path="RECIPIENT_MAIL" type="string">
+      Recipient address for email reports. No default — required if `MAIL_REPORT=yes`.
+    </ParamField>
+  </Tab>
+</Tabs>

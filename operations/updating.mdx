@@ -1,0 +1,61 @@
+---
+title: 'Updating Netbox RIPE Updater to a newer version'
+description: 'Pull the latest changes or check out a specific release tag, rebuild Docker images if needed, and restart the stack to apply updates safely.'
+---
+
+Updates are applied by pulling new code and restarting the containers. Depending on what changed, you may also need to rebuild the Docker images before bringing the stack back up.
+
+<Note>
+This project follows [Semantic Versioning](https://semver.org/). Major version bumps indicate breaking changes — check the GitHub releases page for the changelog before upgrading across a major version boundary.
+</Note>
+
+<Tip>
+Pin to a specific release tag in production for stability. This lets you upgrade on your own schedule and review the changelog before applying changes.
+</Tip>
+
+## Update procedure
+
+<Steps>
+  <Step title="Pull the latest code or check out a specific release">
+    To update to the latest commit on the current branch:
+
+    ```bash
+    git pull
+    ```
+
+    To upgrade to a specific release tag instead:
+
+    ```bash
+    git fetch --tags
+    git checkout <tag_name>
+    ```
+
+    Replace `<tag_name>` with the release you want, for example `v1.2.0`. Available tags are listed on the [GitHub releases page](https://github.com/grizzlyware/netbox-ripe-updater/releases).
+  </Step>
+
+  <Step title="Stop the stack">
+    Bring down the running containers before rebuilding:
+
+    ```bash
+    docker compose down
+    ```
+  </Step>
+
+  <Step title="Rebuild the Docker images">
+    Rebuild the images to pick up any changes to the `Dockerfile` or Python source code:
+
+    ```bash
+    docker compose build
+    ```
+
+    This step is required whenever the `Dockerfile` or files inside `./ripe-updater/` have changed. If only configuration files (`.env`, `.env.updater`, templates) changed, you can skip the rebuild.
+  </Step>
+
+  <Step title="Start the stack">
+    Bring the stack back up in the background:
+
+    ```bash
+    docker compose up -d
+    ```
+  </Step>
+</Steps>

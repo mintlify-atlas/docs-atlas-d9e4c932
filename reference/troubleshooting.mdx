@@ -1,0 +1,201 @@
+---
+title: "Troubleshooting common Netbox RIPE Updater errors"
+description: "Diagnose and fix common issues: authentication failures, RIPE DB errors, missing NetBox custom fields, template lookup errors, and S3 backup failures."
+---
+
+This page covers the most common issues encountered when running Netbox RIPE Updater, their causes, and how to resolve them.
+
+<Tip>
+  Enable `DEBUG=yes` in `.env.updater` and run `docker compose logs -f ripe-updater` to see detailed output for any of the issues below.
+</Tip>
+
+<AccordionGroup>
+
+  <Accordion title="401 Unauthorized on /update">
+    **Cause:** The `Authorisation` header sent by NetBox does not match the `UPDATE_TOKEN` set in `.env.updater`.
+
+    **Resolution:**
+
+    1. Open `.env.updater` and note the value of `UPDATE_TOKEN`.
+    2. In NetBox, go to the webhook configuration for `ripe-updater` and check the **Additional Headers** field.
+    3. The header must be set exactly as:
+       ```
+       Authorisation: Token <your-token>
+       ```
+       Note the British spelling of `Authorisation` — using `Authorization` (American spelling) will not be recognised.
+    4. Ensure there are no leading or trailing spaces in either value.
+  </Accordion>
+
+  <Accordion title="400 Bad Request: 'only prefixes are supported'">
+    **Cause:** The NetBox webhook is firing for an object type other than `ipam | prefix`. The updater only processes prefix webhooks; any other model triggers this error.
+
+    **Resolution:**
+
+    1. In NetBox, open the webhook configuration for `ripe-updater`.
+    2. Under **Assigned Models**, verify that only `ipam | prefix` is selected.
+    3. Remove any other models (e.g. `ipam | ip address`) and save.
+  </Accordion>
+
+  <Accordion title="400 Bad Request: 'missing custom fields'">
+    **Cause:** The NetBox webhook payload does not contain the expected custom fields. This happens when the required custom fields have not been created in NetBox, or are not assigned to the prefix model.
+
+    **Resolution:**
+
+    Ensure all three custom fields exist in NetBox and are assigned to `ipam -> prefixes`:
+
+    | Field name | Type | Required |
+    |------------|------|----------|
+    | `ripe_report` | Boolean | No (default: false) |
+    | `ripe_template` | Selection | No |
+    | `ripe_netname` | String | No |
+
+    The `lir` custom field must also exist and be assigned to `ipam -> aggregates`.
+
+    See [NetBox setup](/configuration/netbox-setup) for full configuration steps.
+  </Accordion>
+
+  <Accordion title="RIPE DB errors / 500 on /update">
+    **Cause:** The application was unable to create, update, or delete the RIPE object. Common causes are incorrect API credentials, wrong database target, or a malformed RIPE object.
+
+    **Resolution:**
+
+    1. Verify that `RIPE_API_USER` and `RIPE_API_PASS` in `.env.updater` are correct and have write permissions on your `INET(6)NUM` objects.
+    2. Check that `RIPE_DB` is set to either `RIPE` or `TEST`. Any other value raises a `ConfigError` and prevents startup.
+    3. Enable verbose logging to see the full RIPE API response:
+       ```bash
+       # In .env.updater
+       DEBUG=yes
+       ```
+       Then tail the logs:
+       ```bash
+       docker compose logs -f ripe-updater
+       ```
+    4. Note that RIPE imposes a maximum TTL of 12 months on API keys. If the key has expired, update `RIPE_API_USER` and `RIPE_API_PASS` and restart the containers:
+       ```bash
+       docker compose down
+       docker compose up -d
+       ```
+  </Accordion>
+
+  <Accordion title="ConfigError: Please set RIPE_DB to RIPE or TEST">
+    **Cause:** The `RIPE_DB` environment variable in `.env.updater` has a value other than `RIPE` or `TEST`. The application raises a `ConfigError` on startup and will not serve requests.
+
+    **Resolution:**
+
+    Open `.env.updater` and set `RIPE_DB` to one of the two accepted values:
+
+    ```bash
+    RIPE_DB=TEST   # Use the RIPE test database (safe for development)
+    # or
+    RIPE_DB=RIPE   # Use the live RIPE database
+    ```
+
+    Restart the container after saving:
+
+    ```bash
+    docker compose down
+    docker compose up -d
+    ```
+  </Accordion>
+
+  <Accordion title="RIPE objects not being created for small prefixes">
+    **Cause:** The prefix length exceeds `SMALLEST_PREFIX_V4` (default `31` for IPv4) or `SMALLEST_PREFIX_V6` (default `127` for IPv6). Prefixes longer than these limits raise an `ErrorSmallPrefix` exception and are silently skipped with a `200` response.
+
+    **Resolution:**
+
+    Adjust the limits in `.env.updater` to allow smaller prefixes:
+
+    ```bash
+    SMALLEST_PREFIX_V4=32   # Allow /32 host routes for IPv4
+    SMALLEST_PREFIX_V6=128  # Allow /128 host routes for IPv6
+    ```
+
+    Valid ranges are `0–32` for IPv4 and `0–128` for IPv6. Restart the container after changing these values.
+  </Accordion>
+
+  <Accordion title="Overlap error on create">
+    **Cause:** Both a parent prefix and one of its child prefixes have `ripe_report=true`. The RIPE DB only allows one level of prefixes below an aggregate, so the create request for the child is rejected with a 400 overlap error.
+
+    This is a known limitation of the updater. The overlap handler in the application will only auto-remove the overlapping RIPE object if NetBox confirms the overlapping prefix should not be in the RIPE DB.
+
+    **Workaround:**
+
+    Disable `ripe_report` on either the parent prefix or the child prefix in NetBox so that only one of them is reported to RIPE.
+  </Accordion>
+
+  <Accordion title="Template not found error">
+    **Cause:** The value of the `ripe_template` custom field on the prefix does not match any key in `templates.json`. Template keys are matched case-sensitively after uppercasing, so a mismatch in spelling or case will cause a lookup failure.
+
+    **Resolution:**
+
+    1. Open `templates/templates.json` and note the exact keys defined under `"templates"`, for example:
+       ```json
+       {
+         "templates": {
+           "CLOUD-POOL": { ... },
+           "CUSTOMER": { ... }
+         }
+       }
+       ```
+    2. In NetBox, open the `ripe_template` custom field and verify that the **Choices** list contains values that exactly match these keys (in uppercase).
+    3. On the affected prefix, confirm the selected template value matches one of the defined keys.
+  </Accordion>
+
+  <Accordion title="S3 backup failures">
+    **Cause:** The application cannot connect to the S3-compatible storage backend, or the credentials are incorrect.
+
+    **Resolution:**
+
+    Check the following variables in `.env.updater`:
+
+    | Variable | Description |
+    |----------|-------------|
+    | `S3_ENDPOINT_URL` | URL of your S3 endpoint. Defaults to `http://minio:9000` for the bundled Minio container. |
+    | `S3_ACCESS_KEY` | Must match `MINIO_ROOT_USER` in `.env` when using the bundled Minio. |
+    | `S3_SECRET_ACCESS_KEY` | Must match `MINIO_ROOT_PASSWORD` in `.env` when using the bundled Minio. |
+    | `S3_BUCKET` | The bucket to write backups to. Defaults to `ripe-backups`. |
+
+    If you are using the bundled Minio instance, confirm it is running:
+
+    ```bash
+    docker compose ps
+    ```
+
+    The `minio` service should be in the `running` state. If it is not, start it:
+
+    ```bash
+    docker compose up -d minio
+    ```
+
+    <Warning>
+      The default Minio credentials in the example `.env` files are not secure. Always set unique values for `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `S3_ACCESS_KEY`, and `S3_SECRET_ACCESS_KEY` before deploying.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Country code not resolving">
+    **Cause:** The updater determines the country code for a prefix by walking up the site's region hierarchy in NetBox looking for a region whose slug is a valid ISO 3166-1 alpha-2 code (e.g. `gb`, `de`, `nl`). If no such region is found, the country field cannot be populated automatically.
+
+    **Resolution:**
+
+    1. In NetBox, check the site associated with the prefix and ensure its parent region has a slug that is a two-letter ISO 3166-1 alpha-2 country code, for example `gb` for the United Kingdom.
+    2. If you cannot restructure the region hierarchy, set a fallback country in `.env.updater`:
+       ```bash
+       DEFAULT_COUNTRY=DE
+       ```
+       This value is used whenever a country code cannot be resolved from the region.
+    3. Enable `DEBUG=yes` and check the logs to trace the region walk and see where resolution fails.
+  </Accordion>
+
+  <Accordion title="Extending a prefix fails (e.g. /27 to /26)">
+    **Cause:** When a prefix is resized in NetBox (e.g. from `/27` to `/26`), the RIPE DB still holds the old object under the original prefix notation. There is no deterministic way for the updater to detect that a resize has occurred rather than a new prefix being created alongside the old one.
+
+    This is a known limitation.
+
+    **Workaround:**
+
+    1. In NetBox, set `ripe_report=false` on the prefix. This triggers deletion of the existing RIPE object.
+    2. Resize the prefix in NetBox to the new size.
+    3. Set `ripe_report=true` on the prefix. This creates a new RIPE object for the resized prefix.
+  </Accordion>
+
+</AccordionGroup>
